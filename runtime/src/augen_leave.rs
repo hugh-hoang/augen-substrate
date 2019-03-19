@@ -8,11 +8,17 @@ use support::{
 };
 use system::ensure_signed;
 
+// TODO: Rust enum, that can be saved in the chain?
+const STATUS_PENDING: u16 = 0;
+const STATUS_APPROVED: u16 = 1;
+const STATUS_REJECTED: u16 = 2;
+
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub struct LeaveRecord<Hash> {
   id: Hash,
   data: Vec<u8>,
+  status: u16,
 }
 
 /// The module's configuration trait.
@@ -33,8 +39,21 @@ decl_event!(
 /// This module's storage items.
 decl_storage! {
   trait Store for Module<T: Trait> as AugenLeave {
-    Records get(records): map T::AccountId => LeaveRecord<T::Hash>;
-    Nonce: u64; // a nonce to generate random hash / id
+    // The storage
+    Record get(records): map T::Hash => LeaveRecord<T::Hash>;
+
+    // Lookup contracts
+    RecordOwner get(record_owner): map T::Hash => T::AccountId;
+
+    RecordHashByIndexAll get(all_record_by_index): map u128 => T::Hash;
+    RecordCountAll get(all_records_count): u128;
+
+    RecordHashByIndexUser get(user_record_by_index): map (T::AccountId, u128) => T::Hash;
+    RecordFromUser get(user_records): map T::AccountId => Vec<T::Hash>;
+    RecordCountUser get(user_records_count): map T::AccountId => u128;
+
+    // a nonce to generate random hash / id
+    Nonce: u128;
   }
 }
 
@@ -47,15 +66,45 @@ decl_module! {
     pub fn submit_record(origin, data: Vec<u8>) -> Result {
       let sender = ensure_signed(origin)?;
 
-      let random_hash = <T as system::Trait>::Hashing::hash_of(&0);
+      // Overflow check, when the number of total records is running over 2^128 which is billions of years to go :)
+      let user_records_count = Self::user_records_count(&sender);
+      let new_user_records_count = user_records_count.checked_add(1)
+          .ok_or("Overflow adding a new record for the user")?;
+
+      let all_records_count = Self::all_records_count();
+      let new_all_records_count = all_records_count.checked_add(1)
+          .ok_or("Overflow adding a new record into the system")?;
+
+      // New record random hash/id
+      let nonce = <Nonce<T>>::get();
+      let random_hash = (<system::Module<T>>::random_seed(), &sender, nonce)
+          .using_encoded(<T as system::Trait>::Hashing::hash);
+
+      // Just to make sure the new ID is unique which should be always as SHA256 collision is billions of years even with high speed brute-force
+      // https://crypto.stackexchange.com/a/47810
+      ensure!(!<Record<T>>::exists(random_hash), "Record hash collides, the hash is already existed.");
+
       let new_record = LeaveRecord {
-        id: random_hash,
-        data: data
+          id: random_hash,
+          data: data,
+          status: STATUS_PENDING
       };
 
-      <Records<T>>::insert(&sender, new_record);
+      <Record<T>>::insert(random_hash, new_record);
+      <RecordOwner<T>>::insert(random_hash, &sender);
+
+      <RecordHashByIndexAll<T>>::insert(all_records_count, random_hash);
+      <RecordCountAll<T>>::put(new_all_records_count);
+
+      <RecordHashByIndexUser<T>>::insert((sender.clone(), user_records_count), random_hash);
+      <RecordCountUser<T>>::insert(&sender, new_user_records_count);
+
+      let mut user_records = Self::user_records(&sender).clone();
+      user_records.push(random_hash);
+      <RecordFromUser<T>>::insert(&sender, user_records);
 
       <Nonce<T>>::mutate(|n| *n += 1);
+
       Self::deposit_event(RawEvent::RecordSubmitted(sender, random_hash));
 
       Ok(())
