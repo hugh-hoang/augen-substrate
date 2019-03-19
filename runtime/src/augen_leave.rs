@@ -44,13 +44,10 @@ decl_storage! {
 
     // Lookup contracts
     RecordOwner get(record_owner): map T::Hash => T::AccountId;
+    RecordHash get(all_record_by_index): map u128 => T::Hash;
+    RecordCount get(all_records_count): u128;
 
-    RecordHashByIndexAll get(all_record_by_index): map u128 => T::Hash;
-    RecordCountAll get(all_records_count): u128;
-
-    RecordHashByIndexUser get(user_record_by_index): map (T::AccountId, u128) => T::Hash;
-    RecordFromUser get(user_records): map T::AccountId => Vec<T::Hash>;
-    RecordCountUser get(user_records_count): map T::AccountId => u128;
+    UserRecords get(user_records): map T::AccountId => Vec<T::Hash>;
 
     // a nonce to generate random hash / id
     Nonce: u128;
@@ -67,10 +64,6 @@ decl_module! {
       let sender = ensure_signed(origin)?;
 
       // Overflow check, when the number of total records is running over 2^128 which is billions of years to go :)
-      let user_records_count = Self::user_records_count(&sender);
-      let new_user_records_count = user_records_count.checked_add(1)
-          .ok_or("Overflow adding a new record for the user")?;
-
       let all_records_count = Self::all_records_count();
       let new_all_records_count = all_records_count.checked_add(1)
           .ok_or("Overflow adding a new record into the system")?;
@@ -93,15 +86,16 @@ decl_module! {
       <Record<T>>::insert(random_hash, new_record);
       <RecordOwner<T>>::insert(random_hash, &sender);
 
-      <RecordHashByIndexAll<T>>::insert(all_records_count, random_hash);
-      <RecordCountAll<T>>::put(new_all_records_count);
-
-      <RecordHashByIndexUser<T>>::insert((sender.clone(), user_records_count), random_hash);
-      <RecordCountUser<T>>::insert(&sender, new_user_records_count);
+      <RecordHash<T>>::insert(all_records_count, random_hash);
+      <RecordCount<T>>::put(new_all_records_count);
 
       let mut user_records = Self::user_records(&sender).clone();
+      let user_records_count = user_records.len();
+      // Overflow check
+      user_records_count.checked_add(1).ok_or("Overflow adding a new record for the user")?;
+
       user_records.push(random_hash);
-      <RecordFromUser<T>>::insert(&sender, user_records);
+      <UserRecords<T>>::insert(&sender, user_records);
 
       <Nonce<T>>::mutate(|n| *n += 1);
 
