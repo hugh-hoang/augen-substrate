@@ -1,20 +1,40 @@
 /// For more guidance on Substrate modules, see the example module
 /// https://github.com/paritytech/substrate/blob/gav-template/srml/example/src/lib.rs
-use support::{decl_module, decl_storage, dispatch::Result, StorageValue};
+use parity_codec::{Decode, Encode};
+use rstd::prelude::*;
+use runtime_primitives::traits::Hash;
+use support::{
+  decl_event, decl_module, decl_storage, dispatch::Result, ensure, StorageMap, StorageValue,
+};
 use system::ensure_signed;
 
-/// The module's configuration trait.
-pub trait Trait: system::Trait {
-  // TODO: Add other types and constants required configure this module.
+#[derive(Encode, Decode, Default, Clone, PartialEq)]
+#[cfg_attr(feature = "std", derive(Debug))]
+pub struct LeaveRecord<Hash> {
+  id: Hash,
+  data: Vec<u8>,
 }
+
+/// The module's configuration trait.
+pub trait Trait: balances::Trait {
+  type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
+}
+
+decl_event!(
+    pub enum Event<T>
+    where
+        <T as system::Trait>::AccountId,
+        <T as system::Trait>::Hash
+    {
+        RecordSubmitted(AccountId, Hash),
+    }
+);
 
 /// This module's storage items.
 decl_storage! {
   trait Store for Module<T: Trait> as AugenLeave {
-    // Just a dummy storage item.
-    // Here we are declaring a StorageValue, `Something` as a Option<u32>
-    // `get(something)` is the default getter which returns either the stored `u32` or `None` if nothing stored
-    Something get(something): Option<u32>;
+    Records get(records): map T::AccountId => LeaveRecord<T::Hash>;
+    Nonce: u64; // a nonce to generate random hash / id
   }
 }
 
@@ -22,16 +42,21 @@ decl_module! {
   /// The module declaration.
   pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 
-    // Just a dummy entry point.
-    // function that can be called by the external world as an extrinsics call
-    // takes a parameter of the type `AccountId`, stores it and emits an event
-    pub fn do_something(origin, something: u32) -> Result {
-      // TODO: You only need this if you want to check it was signed.
-      let who = ensure_signed(origin)?;
+    fn deposit_event<T>() = default;
 
-      // TODO: Code to execute when something calls this.
-      // For example: the following line stores the passed in u32 in the storage
-      <Something<T>>::put(something);
+    pub fn submit_record(origin, data: Vec<u8>) -> Result {
+      let sender = ensure_signed(origin)?;
+
+      let random_hash = <T as system::Trait>::Hashing::hash_of(&0);
+      let new_record = LeaveRecord {
+        id: random_hash,
+        data: data
+      };
+
+      <Records<T>>::insert(&sender, new_record);
+
+      <Nonce<T>>::mutate(|n| *n += 1);
+      Self::deposit_event(RawEvent::RecordSubmitted(sender, random_hash));
 
       Ok(())
     }

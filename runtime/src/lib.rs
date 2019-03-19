@@ -177,7 +177,9 @@ impl sudo::Trait for Runtime {
 }
 
 /// Custom traits
-impl augen_leave::Trait for Runtime {}
+impl augen_leave::Trait for Runtime {
+  type Event = Event;
+}
 
 construct_runtime!(
 	pub enum Runtime with Log(InternalLog: DigestItem<Hash, Ed25519AuthorityId>) where
@@ -194,7 +196,7 @@ construct_runtime!(
 		Sudo: sudo,
 		Fees: fees::{Module, Storage, Config<T>, Event<T>},
 		// Custom declarations
-		AugenLeave: augen_leave::{Module, Call, Storage},
+		AugenLeave: augen_leave::{Module, Call, Storage, Event<T>},
 	}
 );
 
